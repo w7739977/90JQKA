@@ -610,6 +610,23 @@ input, textarea {
   border: 1px solid rgba(99, 102, 241, 0.3);
 }
 
+.ptag-spectating {
+  background: rgba(168, 85, 247, 0.14);
+  color: #c4b5fd;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.spectating-banner {
+  text-align: center;
+  margin-bottom: 10px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  font-size: 13px;
+  color: #c4b5fd;
+}
+
 .ptag-card {
   background: rgba(251, 191, 36, 0.12);
   color: #fde68a;

@@ -72,7 +72,8 @@ function sanitizeRoom(room) {
       activeQ: p.activeQ,
       drawnCards: p.drawnCards,
       offline: p.offline || false,
-      lastDrawnCard: p.lastDrawnCard || null
+      lastDrawnCard: p.lastDrawnCard || null,
+      spectating: p.spectating || false
     })),
     turnLog: room.turnLog.slice(-30),
     pendingAction: room.pendingAction || null
@@ -142,12 +143,7 @@ app.post('/api/joinRoom', (req, res) => {
       return res.json({ ok: false, code: 'ROOM_FULL', message: '房间已满（最多6人）' });
     }
 
-    if (room.status !== 'waiting') {
-      const idx = room.players.findIndex(p => p.openId === playerId);
-      if (idx === -1) {
-        return res.json({ ok: false, code: 'GAME_IN_PROGRESS', message: '游戏进行中，无法加入' });
-      }
-    }
+    const isGameInProgress = room.status !== 'waiting';
 
     const players = room.players;
     const idx = players.findIndex(p => p.openId === playerId);
@@ -157,7 +153,8 @@ app.post('/api/joinRoom', (req, res) => {
       players.push({
         openId: playerId, nickName, avatarUrl,
         ready: false, drinks: 0, activeQ: false,
-        drawnCards: [], offline: false, lastDrawnCard: null
+        drawnCards: [], offline: false, lastDrawnCard: null,
+        spectating: isGameInProgress
       });
     } else {
       players[idx].nickName = nickName;
@@ -169,6 +166,7 @@ app.post('/api/joinRoom', (req, res) => {
     broadcastRoom(roomId);
     res.json({
       ok: true, openId: playerId,
+      spectating: isNewPlayer && isGameInProgress,
       room: sanitizeRoom(room)
     });
   } catch (err) {
@@ -240,11 +238,13 @@ app.post('/api/startGame', (req, res) => {
       return res.json({ ok: false, code: 'GAME_STARTED', message: '游戏已经开始' });
     }
 
-    if (room.players.length < 2) {
+    // Only count non-spectating players
+    const activePlayers = room.players.filter(p => !p.spectating);
+    if (activePlayers.length < 2) {
       return res.json({ ok: false, code: 'NOT_ENOUGH', message: '至少需要2名玩家' });
     }
 
-    const allReady = room.players.every(p => p.ready);
+    const allReady = activePlayers.every(p => p.ready);
     if (!allReady) {
       return res.json({ ok: false, code: 'NOT_ALL_READY', message: '还有玩家未准备' });
     }
@@ -252,7 +252,9 @@ app.post('/api/startGame', (req, res) => {
     // Initialize game
     room.deck = shuffle(createDeck());
     room.drawIndex = 0;
-    room.currentPlayerIdx = 0; // owner starts
+    // Find owner's index as starting player
+    const ownerIdx = room.players.findIndex(p => p.openId === room.ownerOpenId);
+    room.currentPlayerIdx = ownerIdx >= 0 ? ownerIdx : 0;
     room.direction = 1;
     room.publicCup = 0;
     room.kCount = 0;
@@ -301,6 +303,10 @@ app.post('/api/drawCard', (req, res) => {
 
     if (!currentPlayer || currentPlayer.openId !== playerId) {
       return res.json({ ok: false, code: 'NOT_YOUR_TURN', message: '还没轮到你' });
+    }
+
+    if (currentPlayer.spectating) {
+      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
     }
 
     if (room.drawIndex >= room.deck.length) {
@@ -456,6 +462,10 @@ app.post('/api/skipTurn', (req, res) => {
       return res.json({ ok: false, code: 'NOT_YOUR_TURN', message: '还没轮到你' });
     }
 
+    if (currentPlayer.spectating) {
+      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
+    }
+
     if (!currentPlayer.activeQ) {
       return res.json({ ok: false, code: 'NO_Q', message: '你没有跳过能力' });
     }
@@ -508,6 +518,7 @@ app.post('/api/restartGame', (req, res) => {
       p.activeQ = false;
       p.drawnCards = [];
       p.lastDrawnCard = null;
+      p.spectating = false; // 观战玩家下一局自动参与
     });
     room.status = 'waiting';
     room.updatedAt = new Date();
@@ -566,7 +577,13 @@ app.post('/api/kickPlayer', (req, res) => {
 
 function advanceToNextPlayer(room) {
   const n = room.players.length;
-  room.currentPlayerIdx = (room.currentPlayerIdx + room.direction + n) % n;
+  let idx = room.currentPlayerIdx;
+  // Skip spectating players
+  for (let i = 0; i < n; i++) {
+    idx = (idx + room.direction + n) % n;
+    if (!room.players[idx].spectating) break;
+  }
+  room.currentPlayerIdx = idx;
 }
 
 // ============================================================

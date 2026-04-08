@@ -304,6 +304,9 @@
     }).then(function (result) {
       hideLoading();
       if (!result.ok) { showToast(result.message || '加入失败'); return; }
+      if (result.spectating) {
+        showToast('游戏进行中，你将观战本局', 3000);
+      }
       navigate('/room/' + roomId);
     }).catch(function () { hideLoading(); showToast('加入失败'); });
   };
@@ -393,6 +396,9 @@
     }).then(function (result) {
       hideLoading();
       if (!result.ok) { showToast(result.message || '加入失败'); return; }
+      if (result.spectating) {
+        showToast('游戏进行中，你将观战本局', 3000);
+      }
       handleRoomUpdate(result.room);
     }).catch(function () { hideLoading(); showToast('加入失败'); });
   };
@@ -418,6 +424,12 @@
     html += '<button class="invite-btn" onclick="App.invite()">邀请</button>';
     html += '</div>';
 
+    // Spectating banner
+    var selfPlayer = room.players.find(function (p) { return p.openId === selfId; });
+    if (selfPlayer && selfPlayer.spectating) {
+      html += '<div class="spectating-banner">👁 你正在观战，下一局自动参与</div>';
+    }
+
     if (status === 'waiting') {
       html += renderWaitingPage(room);
     } else if (status === 'playing') {
@@ -438,9 +450,11 @@
   function renderWaitingPage(room) {
     var selfId = state.playerId;
     var isOwner = room.ownerOpenId === selfId;
-    var allReady = room.players.every(function (p) { return p.ready; });
+    var activePlayers = room.players.filter(function (p) { return !p.spectating; });
+    var allReady = activePlayers.every(function (p) { return p.ready; });
     var selfPlayer = room.players.find(function (p) { return p.openId === selfId; });
     var selfReady = selfPlayer && selfPlayer.ready;
+    var selfSpectating = selfPlayer && selfPlayer.spectating;
 
     var html = '';
 
@@ -457,8 +471,13 @@
       html += '<span class="nickname">' + escHtml(p.nickName) + '</span>';
       html += '<div class="player-tags">';
       if (p.drinks > 0) html += '<span class="ptag ptag-drinks">🍺' + p.drinks + '</span>';
-      if (p.ready) html += '<span class="ptag ptag-ready">已准备</span>';
-      else if (isSelf) html += '<span class="ptag ptag-waiting">未准备</span>';
+      if (p.spectating) {
+        html += '<span class="ptag ptag-spectating">👁观战</span>';
+      } else if (p.ready) {
+        html += '<span class="ptag ptag-ready">已准备</span>';
+      } else if (isSelf) {
+        html += '<span class="ptag ptag-waiting">未准备</span>';
+      }
       html += '</div>';
       html += '</div>';
     });
@@ -466,7 +485,9 @@
 
     // Bottom bar
     html += '<div class="bottom-bar">';
-    if (isOwner && allReady && room.players.length >= 2) {
+    if (selfSpectating) {
+      html += '<span class="status-text">👁 观战中，下一局自动参与...</span>';
+    } else if (isOwner && allReady && activePlayers.length >= 2) {
       html += '<button class="btn btn-primary btn-full" onclick="App.startGame()">开始游戏</button>';
     } else if (isOwner && !allReady) {
       html += '<span class="status-text">等待所有玩家准备...</span>';
@@ -529,6 +550,7 @@
       html += renderAvatar(p.nickName, 40, avatarClass);
       html += '<span class="nickname">' + escHtml(p.nickName) + (isCurrent ? ' 🎯' : '') + '</span>';
       html += '<div class="player-tags">';
+      if (p.spectating) html += '<span class="ptag ptag-spectating">👁观战</span>';
       if (p.drinks > 0) html += '<span class="ptag ptag-drinks">🍺' + p.drinks + '</span>';
       if (p.activeQ) html += '<span class="ptag ptag-q-shield">🛡Q</span>';
       html += '</div>';
@@ -582,7 +604,9 @@
 
     // Bottom bar
     html += '<div class="bottom-bar">';
-    if (isPendingForMe && pendingAction.type === 'addWine') {
+    if (selfPlayer && selfPlayer.spectating) {
+      html += '<span class="status-text">👁 观战中，等待下一局...</span>';
+    } else if (isPendingForMe && pendingAction.type === 'addWine') {
       html += '<span class="status-text" style="color:#fbbf24">你摸到了J，请选择加酒杯数 ↑</span>';
     } else if (isMyTurn) {
       if (selfPlayer && selfPlayer.activeQ) {
