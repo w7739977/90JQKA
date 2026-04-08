@@ -87,7 +87,7 @@
 ├── public/
 │   ├── index.html       # 入口 HTML
 │   ├── app.js           # 前端：路由、状态管理、页面渲染、交互逻辑
-│   ├── test-runner.js   # 自动化测试运行器（35+ 用例 + 实时诊断）
+│   ├── test-runner.js   # 自动化测试运行器（40+ 用例 + 实时诊断）
 │   ├── sim-runner.js    # 模拟玩家测试（可视化全流程，可配置）
 │   ├── qrcode.min.js    # 二维码生成库
 │   └── style.css        # 全局样式
@@ -167,9 +167,9 @@ cd ~/90JQKA && git pull && pm2 restart 90jqka
 | `/api/getRoom` | POST | 获取房间状态 |
 | `/api/ready` | POST | 准备/取消准备 |
 | `/api/startGame` | POST | 开始游戏（房主，全员准备后） |
-| `/api/drawCard` | POST | 摸牌（当前玩家） |
+| `/api/drawCard` | POST | 摸牌（当前玩家，观战者返回 `SPECTATING`） |
 | `/api/addWine` | POST | 加酒（摸到 J 后，1-3 杯） |
-| `/api/skipTurn` | POST | 跳过回合（使用 Q） |
+| `/api/skipTurn` | POST | 跳过回合（使用 Q，观战者返回 `SPECTATING`） |
 | `/api/restartGame` | POST | 再来一局（房主） |
 | `/api/kickPlayer` | POST | 踢人（房主） |
 
@@ -183,7 +183,7 @@ Room:
 
 Player:
   openId, nickName, avatarUrl, ready, drinks,
-  activeQ, drawnCards[], offline, lastDrawnCard
+  activeQ, drawnCards[], offline, lastDrawnCard, spectating
 
 PendingAction:
   type: 'addWine', playerIdx, card
