@@ -1,0 +1,15 @@
+{
+  "name": "90jqka-web",
+  "version": "1.0.0",
+  "description": "90JQKA 饮酒扑克 Web 版",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "qrcode-generator": "^2.0.4",
+    "socket.io": "^4.7.5"
+  }
+}
