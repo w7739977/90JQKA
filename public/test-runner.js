@@ -649,6 +649,128 @@
     assertEq(r.code, 'NOT_OWNER');
   });
 
+  group('观战机制');
+  test('游戏中加入标记为观战', async function () {
+    var info = await createStartedRoom(2, 'spec_');
+    var jr = await api('joinRoom', { playerId: 'spec_new', nickName: 'LateJoiner', roomId: info.roomId });
+    assertOk(jr, 'joinRoom should succeed');
+    assert(jr.spectating === true, 'Should be marked as spectating');
+    var st = await api('getRoom', { playerId: info.players[0].id, roomId: info.roomId });
+    var newPlayer = st.room.players.find(function (p) { return p.openId === 'spec_new'; });
+    assert(newPlayer && newPlayer.spectating === true, 'Player should be spectating in room state');
+  });
+
+  test('观战玩家不能摸牌', async function () {
+    var info = await createStartedRoom(2, 'spdr_');
+    var spectatorId = 'spdr_new';
+    await api('joinRoom', { playerId: spectatorId, nickName: 'Watcher', roomId: info.roomId });
+    var r = await api('drawCard', { playerId: spectatorId, roomId: info.roomId });
+    assert(!r.ok, 'Spectating player should not be able to draw');
+    assertEq(r.code, 'SPECTATING');
+  });
+
+  test('观战玩家不能跳过', async function () {
+    var info = await createStartedRoom(2, 'spsk_');
+    var spectatorId = 'spsk_new';
+    await api('joinRoom', { playerId: spectatorId, nickName: 'Watcher', roomId: info.roomId });
+    var r = await api('skipTurn', { playerId: spectatorId, roomId: info.roomId });
+    assert(!r.ok, 'Spectating player should not be able to skip');
+    // Could be SPECTATING or NOT_YOUR_TURN depending on state
+    assert(r.code === 'SPECTATING' || r.code === 'NOT_YOUR_TURN',
+      'Expected SPECTATING or NOT_YOUR_TURN, got ' + r.code);
+  });
+
+  test('轮转跳过观战玩家', async function () {
+    var info = await createStartedRoom(3, 'sprot_');
+    // 4th player joins as spectator
+    var specId = 'sprot_spec';
+    await api('joinRoom', { playerId: specId, nickName: 'Spectator', roomId: info.roomId });
+
+    // Draw several cards and verify spectator is never the current player
+    for (var i = 0; i < 10; i++) {
+      var st = await api('getRoom', { playerId: info.players[0].id, roomId: info.roomId });
+      if (st.room.status === 'finished') break;
+      var currentPid = st.room.players[st.room.currentPlayerIdx].openId;
+      assert(currentPid !== specId, 'Spectator should never be current player (turn ' + (i + 1) + ')');
+      await autoDraw(info.roomId, info.players);
+    }
+  });
+
+  test('restart清除spectating', async function () {
+    var info = await createStartedRoom(2, 'sprst_');
+    var specId = 'sprst_spec';
+    await api('joinRoom', { playerId: specId, nickName: 'Spectator', roomId: info.roomId });
+
+    // Verify spectator is marked
+    var before = await api('getRoom', { playerId: info.players[0].id, roomId: info.roomId });
+    var specBefore = before.room.players.find(function (p) { return p.openId === specId; });
+    assert(specBefore && specBefore.spectating === true, 'Should be spectating before restart');
+
+    // Play to end
+    for (var i = 0; i < 30; i++) {
+      var r = await autoDraw(info.roomId, info.players);
+      if (r.cardEffect && r.cardEffect.type === 'gameOver') break;
+    }
+
+    // Restart
+    var rest = await api('restartGame', { playerId: info.players[0].id, roomId: info.roomId });
+    assertOk(rest, 'restartGame');
+
+    // Verify all spectating flags cleared
+    var after = await api('getRoom', { playerId: info.players[0].id, roomId: info.roomId });
+    after.room.players.forEach(function (p) {
+      assert(p.spectating === false, p.nickName + ' should not be spectating after restart');
+    });
+  });
+
+  test('前观战玩家下一局正常参与', async function () {
+    var info = await createStartedRoom(2, 'spplay_');
+    var specId = 'spplay_spec';
+    await api('joinRoom', { playerId: specId, nickName: 'FormerSpec', roomId: info.roomId });
+
+    // Play to end
+    for (var i = 0; i < 30; i++) {
+      var r = await autoDraw(info.roomId, info.players);
+      if (r.cardEffect && r.cardEffect.type === 'gameOver') break;
+    }
+
+    // Restart
+    await api('restartGame', { playerId: info.players[0].id, roomId: info.roomId });
+
+    // Former spectator readies
+    var rr = await api('ready', { playerId: specId, roomId: info.roomId });
+    assertOk(rr, 'Former spectator should be able to ready');
+
+    // Ready all others
+    for (var j = 0; j < info.players.length; j++) {
+      await api('ready', { playerId: info.players[j].id, roomId: info.roomId });
+    }
+
+    // Start game
+    var sr = await api('startGame', { playerId: info.players[0].id, roomId: info.roomId });
+    assertOk(sr, 'startGame should succeed with former spectator');
+
+    // Former spectator should be able to draw when it's their turn
+    var foundSpecTurn = false;
+    for (var k = 0; k < 30; k++) {
+      var st = await api('getRoom', { playerId: info.players[0].id, roomId: info.roomId });
+      if (st.room.status === 'finished') break;
+      var cp = st.room.players[st.room.currentPlayerIdx];
+      if (cp.openId === specId) {
+        foundSpecTurn = true;
+        var dr = await api('drawCard', { playerId: specId, roomId: info.roomId });
+        assertOk(dr, 'Former spectator should be able to draw');
+        if (dr.cardEffect && dr.cardEffect.type === 'addWine') {
+          await api('addWine', { playerId: specId, roomId: info.roomId, cups: 1 });
+        }
+        if (dr.cardEffect && dr.cardEffect.type === 'gameOver') break;
+      } else {
+        await autoDraw(info.roomId, info.players);
+      }
+    }
+    assert(foundSpecTurn, 'Former spectator should have had a turn');
+  });
+
   group('完整游戏流程');
   test('2人完整游戏', async function (result) {
     var info = await createStartedRoom(2, 'full2_');

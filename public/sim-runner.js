@@ -119,6 +119,29 @@
       log('success', '🎮 游戏开始！20张牌已洗好');
       await sleep(speed);
 
+      // ---- Phase 4.5: Spectating test ----
+      if (n < 6) {
+        log('phase', '📋 阶段4.5：观战机制测试');
+        await sleep(speed);
+
+        var spectatorId = prefix + 'spectator';
+        var spectatorName = '🧐 观战者';
+        var specJR = await api('joinRoom', { playerId: spectatorId, nickName: spectatorName, roomId: roomId });
+        if (specJR.ok && specJR.spectating) {
+          log('info', '👋 ' + spectatorName + ' 游戏中途加入 → 标记为观战');
+          // Try to draw as spectator (should fail)
+          var specDraw = await api('drawCard', { playerId: spectatorId, roomId: roomId });
+          if (!specDraw.ok && specDraw.code === 'SPECTATING') {
+            log('info', '  ↳ ✅ 观战者摸牌被正确拒绝（code: SPECTATING）');
+          } else {
+            log('error', '  ↳ ❌ 观战者摸牌未被拒绝');
+          }
+        } else {
+          log('error', '观战者加入失败');
+        }
+        await sleep(speed);
+      }
+
       // ---- Phase 5: Game loop ----
       log('phase', '📋 阶段5：游戏进行');
 
@@ -262,25 +285,36 @@
         log('success', '🔄 再来一局！喝酒数已保留（不清零）');
         var drinksPreserved = restR.room.players.every(function (p) { return p.drinks >= 0; });
         var readyReset = restR.room.players.every(function (p) { return p.ready === false; });
-        log('info', '  ↳ 喝酒数保留: ' + (drinksPreserved ? '✅' : '❌') + ' | 准备状态重置: ' + (readyReset ? '✅' : '❌'));
+        var specCleared = restR.room.players.every(function (p) { return !p.spectating; });
+        log('info', '  ↳ 喝酒数保留: ' + (drinksPreserved ? '✅' : '❌') +
+          ' | 准备状态重置: ' + (readyReset ? '✅' : '❌') +
+          ' | 观战标记清除: ' + (specCleared ? '✅' : '❌'));
+
+        // Check former spectator count for phase 8
+        var n2 = restR.room.players.length;
+        var phase8Players = [];
+        restR.room.players.forEach(function (p) {
+          phase8Players.push({ id: p.openId, name: p.nickName });
+        });
       } else {
         log('error', '再来一局失败: ' + restR.message);
       }
 
-      // ---- Phase 8: Play another round ----
-      log('phase', '📋 阶段8：第二局游戏');
+      // ---- Phase 8: Play another round (including former spectator) ----
+      log('phase', '📋 阶段8：第二局游戏（含前观战者）');
       await sleep(speed);
 
-      // Ready all again
-      for (var i = 0; i < n; i++) {
-        await api('ready', { playerId: players[i].id, roomId: roomId });
+      // Ready all (including former spectator)
+      var allPlayersR2 = phase8Players || players;
+      for (var i = 0; i < allPlayersR2.length; i++) {
+        await api('ready', { playerId: allPlayersR2[i].id || allPlayersR2[i], roomId: roomId });
         await sleep(Math.max(speed / 3, 200));
       }
-      log('info', '✋ 所有玩家已准备');
+      log('info', '✋ 所有玩家已准备（含前观战者 ' + allPlayersR2.length + ' 人）');
 
       var sr2 = await api('startGame', { playerId: players[0].id, roomId: roomId });
       if (!sr2.ok) { log('error', '第二局开始失败: ' + sr2.message); running = false; return; }
-      log('success', '🎮 第二局开始！');
+      log('success', '🎮 第二局开始！（' + sr2.room.players.length + '人参与）');
       await sleep(speed);
 
       // Play round 2
@@ -299,21 +333,23 @@
         if (!d2.ok) break;
 
         turnNum++;
+        var isSpectator = cp2.nickName.indexOf('观战者') >= 0;
+        var prefix2 = isSpectator ? '🧐 ' : '';
         if (d2.cardEffect && d2.cardEffect.type === 'addWine') {
-          log('card-J', '🍺 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 加酒');
+          log('card-J', prefix2 + '🍺 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 加酒');
           await api('addWine', { playerId: cp2.openId, roomId: roomId, cups: 1 });
         } else if (d2.cardEffect && d2.cardEffect.type === 'gameOver') {
-          log('gameover', '🏁 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到第4张A → 游戏结束！');
+          log('gameover', prefix2 + '🏁 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到第4张A → 游戏结束！');
         } else if (d2.cardEffect && d2.cardEffect.type === 'reverse') {
-          log('card-10', '🔄 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 方向反转');
+          log('card-10', prefix2 + '🔄 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 方向反转');
         } else if (d2.cardEffect && d2.cardEffect.type === 'drink') {
-          log('card-K', '😵 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 喝' + d2.cardEffect.amount + '杯');
+          log('card-K', prefix2 + '😵 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 喝' + d2.cardEffect.amount + '杯');
         } else if (d2.cardEffect && d2.cardEffect.type === 'drawAgain') {
-          log('card-A', '🔁 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 继续摸');
+          log('card-A', prefix2 + '🔁 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 继续摸');
         } else if (d2.cardEffect && d2.cardEffect.type === 'qGain') {
-          log('card-Q', '🛡️ R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 获得Q');
+          log('card-Q', prefix2 + '🛡️ R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → 获得Q');
         } else if (d2.cardEffect && d2.cardEffect.type === 'qCancel') {
-          log('card-Q', '💥 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → Q互消');
+          log('card-Q', prefix2 + '💥 R2第' + turnNum + '回合 | ' + cp2.nickName + ' 摸到 ' + d2.card + ' → Q互消');
         }
 
         await sleep(Math.max(speed / 2, 400));
