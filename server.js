@@ -298,15 +298,17 @@ app.post('/api/drawCard', (req, res) => {
       return res.json({ ok: false, code: 'PENDING_ACTION', message: '请先完成当前操作' });
     }
 
+    // Check spectating BEFORE turn check (spectators are never current player)
+    const requestingPlayer = room.players.find(p => p.openId === playerId);
+    if (requestingPlayer && requestingPlayer.spectating) {
+      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
+    }
+
     const currentIdx = room.currentPlayerIdx;
     const currentPlayer = room.players[currentIdx];
 
     if (!currentPlayer || currentPlayer.openId !== playerId) {
       return res.json({ ok: false, code: 'NOT_YOUR_TURN', message: '还没轮到你' });
-    }
-
-    if (currentPlayer.spectating) {
-      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
     }
 
     if (room.drawIndex >= room.deck.length) {
@@ -455,15 +457,17 @@ app.post('/api/skipTurn', (req, res) => {
       return res.json({ ok: false, code: 'PENDING_ACTION', message: '请先完成当前操作' });
     }
 
+    // Check spectating BEFORE turn check (spectators are never current player)
+    const requestingPlayer = room.players.find(p => p.openId === playerId);
+    if (requestingPlayer && requestingPlayer.spectating) {
+      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
+    }
+
     const currentIdx = room.currentPlayerIdx;
     const currentPlayer = room.players[currentIdx];
 
     if (!currentPlayer || currentPlayer.openId !== playerId) {
       return res.json({ ok: false, code: 'NOT_YOUR_TURN', message: '还没轮到你' });
-    }
-
-    if (currentPlayer.spectating) {
-      return res.json({ ok: false, code: 'SPECTATING', message: '观战中，等待下一局' });
     }
 
     if (!currentPlayer.activeQ) {
