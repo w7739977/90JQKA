@@ -130,7 +130,7 @@
         if (specJR.ok && specJR.spectating) {
           log('info', '👋 ' + spectatorName + ' 游戏中途加入 → 标记为观战');
           // Try to draw as spectator (should fail)
-          var specDraw = await api('drawCard', { playerId: spectatorId, roomId: roomId });
+          var specDraw = await api('drawCard', { playerId: spectatorId, roomId: roomId, position: 0 });
           if (!specDraw.ok && specDraw.code === 'SPECTATING') {
             log('info', '  ↳ ✅ 观战者摸牌被正确拒绝（code: SPECTATING）');
           } else {
