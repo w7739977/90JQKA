@@ -132,9 +132,19 @@
 
   // Helper: draw a card for whichever player is current, auto-handle addWine
   async function autoDraw(roomId, players) {
+    // Get room state to find an unrevealed card position
+    var st = await api('getRoom', { playerId: players[0].id, roomId: roomId });
+    if (!st.ok) throw new Error('getRoom failed in autoDraw');
+    var position = -1;
+    var cards = st.room.cards || [];
+    for (var k = 0; k < cards.length; k++) {
+      if (!cards[k].revealed) { position = k; break; }
+    }
+    if (position === -1) throw new Error('No unrevealed cards');
+
     for (var i = 0; i < players.length; i++) {
       var pid = players[i].id;
-      var r = await api('drawCard', { playerId: pid, roomId: roomId });
+      var r = await api('drawCard', { playerId: pid, roomId: roomId, position: position });
       if (r.ok) {
         // Auto handle addWine
         if (r.cardEffect && r.cardEffect.type === 'addWine') {
@@ -144,6 +154,17 @@
       }
     }
     throw new Error('No player could draw');
+  }
+
+  // Helper: find first unrevealed position
+  async function findUnrevealedPos(roomId, playerId) {
+    var st = await api('getRoom', { playerId: playerId, roomId: roomId });
+    if (!st.ok) return 0;
+    var cards = st.room.cards || [];
+    for (var k = 0; k < cards.length; k++) {
+      if (!cards[k].revealed) return k;
+    }
+    return 0;
   }
 
   // ============================================================
@@ -261,19 +282,20 @@
   group('摸牌逻辑');
   test('drawCard 只有当前玩家能摸牌', async function () {
     var info = await createStartedRoom(2, 'turn_');
+    var pos = await findUnrevealedPos(info.roomId, info.players[0].id);
     // Player 1 (owner) should be current
-    var r0 = await api('drawCard', { playerId: info.players[1].id, roomId: info.roomId });
+    var r0 = await api('drawCard', { playerId: info.players[1].id, roomId: info.roomId, position: pos });
     assert(!r0.ok, 'p1 should not be able to draw');
     assertEq(r0.code, 'NOT_YOUR_TURN');
     // Player 0 should be able to draw
-    var r1 = await api('drawCard', { playerId: info.players[0].id, roomId: info.roomId });
+    var r1 = await api('drawCard', { playerId: info.players[0].id, roomId: info.roomId, position: pos });
     assertOk(r1, 'p0 should draw');
     assert(r1.card, 'should have a card');
   });
 
   test('drawCard 游戏未开始不能摸牌', async function () {
     var c = await api('createRoom', { playerId: 'nd1', nickName: 'H' });
-    var r = await api('drawCard', { playerId: 'nd1', roomId: c.roomId });
+    var r = await api('drawCard', { playerId: 'nd1', roomId: c.roomId, position: 0 });
     assert(!r.ok);
     assertEq(r.code, 'NOT_PLAYING');
   });
@@ -294,10 +316,12 @@
     var info2 = await createStartedRoom(2, 'pend2_');
     for (var i = 0; i < 20; i++) {
       for (var j = 0; j < info2.players.length; j++) {
-        var r = await api('drawCard', { playerId: info2.players[j].id, roomId: info2.roomId });
+        var pos = await findUnrevealedPos(info2.roomId, info2.players[0].id);
+        var r = await api('drawCard', { playerId: info2.players[j].id, roomId: info2.roomId, position: pos });
         if (r.ok && r.cardEffect && r.cardEffect.type === 'addWine') {
           // Try drawing again without adding wine
-          var fail = await api('drawCard', { playerId: info2.players[j].id, roomId: info2.roomId });
+          var pos2 = await findUnrevealedPos(info2.roomId, info2.players[0].id);
+          var fail = await api('drawCard', { playerId: info2.players[j].id, roomId: info2.roomId, position: pos2 });
           assert(!fail.ok, 'should fail with pending action');
           assertEq(fail.code, 'PENDING_ACTION');
           // Clean up
@@ -351,7 +375,8 @@
 
     for (var i = 0; i < 20; i++) {
       for (var j = 0; j < info.players.length; j++) {
-        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId });
+        var pos = await findUnrevealedPos(info.roomId, info.players[0].id);
+        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId, position: pos });
         if (r.ok) {
           if (r.cardEffect && r.cardEffect.type === 'addWine') {
             var cups = 2;
@@ -374,7 +399,8 @@
     var info = await createStartedRoom(2, 'awfx_');
     for (var i = 0; i < 20; i++) {
       for (var j = 0; j < info.players.length; j++) {
-        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId });
+        var pos = await findUnrevealedPos(info.roomId, info.players[0].id);
+        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId, position: pos });
         if (r.ok && r.cardEffect && r.cardEffect.type === 'addWine') {
           // Wrong player tries addWine
           var other = info.players[1 - j].id;
@@ -396,7 +422,7 @@
     assertEq(r.code, 'INVALID_CUPS');
   });
 
-  test('Q 效果：双Q互消', async function (result) {
+  test('Q 效果：同玩家双Q自消，不同玩家可共存', async function (result) {
     var info = await createStartedRoom(3, 'qfx_');
     var qGains = 0;
     var qCancels = 0;
@@ -409,9 +435,8 @@
     }
     // 一共只有4张Q牌，每个qGain或qCancel都对应摸出1张Q，所以总和不超过4
     assert(qGains + qCancels <= 4, 'Q cards drawn should not exceed 4, got ' + (qGains + qCancels));
-    // qCancel > 0 说明双Q互消逻辑确实触发了
     assert(qGains + qCancels > 0, 'Should have at least one Q event');
-    result.detail = 'Q gains: ' + qGains + ', Q cancels: ' + qCancels + ', total Q cards: ' + (qGains + qCancels);
+    result.detail = 'Q gains: ' + qGains + ', Q cancels (self): ' + qCancels + ', total Q cards: ' + (qGains + qCancels);
   });
 
   test('A 效果：继续摸牌，第4张A结束', async function (result) {
@@ -444,7 +469,8 @@
 
     for (var i = 0; i < 30; i++) {
       for (var j = 0; j < info.players.length; j++) {
-        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId });
+        var pos = await findUnrevealedPos(info.roomId, info.players[0].id);
+        var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId, position: pos });
         if (r.ok) {
           if (r.cardEffect && r.cardEffect.type === 'addWine') {
             await api('addWine', { playerId: info.players[j].id, roomId: info.roomId, cups: 1 });
@@ -476,7 +502,8 @@
 
       for (var i = 0; i < 20; i++) {
         for (var j = 0; j < info.players.length; j++) {
-          var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId });
+          var pos = await findUnrevealedPos(info.roomId, info.players[0].id);
+          var r = await api('drawCard', { playerId: info.players[j].id, roomId: info.roomId, position: pos });
           if (r.ok) {
             if (r.cardEffect && r.cardEffect.type === 'addWine') {
               await api('addWine', { playerId: info.players[j].id, roomId: info.roomId, cups: 1 });
@@ -564,7 +591,8 @@
 
             if (curPid === qHolderPid && holderNow.activeQ) {
               // Q holder's turn! Draw normally (not skip) and check Q persists
-              var drawR = await api('drawCard', { playerId: qHolderPid, roomId: info.roomId });
+              var drawPos = await findUnrevealedPos(info.roomId, info.players[0].id);
+              var drawR = await api('drawCard', { playerId: qHolderPid, roomId: info.roomId, position: drawPos });
               if (drawR.ok) {
                 if (drawR.cardEffect && drawR.cardEffect.type === 'addWine') {
                   await api('addWine', { playerId: qHolderPid, roomId: info.roomId, cups: 1 });
@@ -664,7 +692,7 @@
     var info = await createStartedRoom(2, 'spdr_');
     var spectatorId = 'spdr_new';
     await api('joinRoom', { playerId: spectatorId, nickName: 'Watcher', roomId: info.roomId });
-    var r = await api('drawCard', { playerId: spectatorId, roomId: info.roomId });
+    var r = await api('drawCard', { playerId: spectatorId, roomId: info.roomId, position: 0 });
     assert(!r.ok, 'Spectating player should not be able to draw');
     assertEq(r.code, 'SPECTATING');
   });
@@ -758,7 +786,8 @@
       var cp = st.room.players[st.room.currentPlayerIdx];
       if (cp.openId === specId) {
         foundSpecTurn = true;
-        var dr = await api('drawCard', { playerId: specId, roomId: info.roomId });
+        var drPos = await findUnrevealedPos(info.roomId, info.players[0].id);
+        var dr = await api('drawCard', { playerId: specId, roomId: info.roomId, position: drPos });
         assertOk(dr, 'Former spectator should be able to draw');
         if (dr.cardEffect && dr.cardEffect.type === 'addWine') {
           await api('addWine', { playerId: specId, roomId: info.roomId, cups: 1 });

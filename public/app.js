@@ -534,7 +534,7 @@
     html += '<div class="direction-bar">';
     html += '<span class="direction-arrow">' + dirArrow + '</span>';
     html += '<span>' + dirText + '</span>';
-    html += '<span style="margin-left:auto;font-size:11px;color:#6b7280">剩余 ' + (room.deckSize - room.drawIndex) + ' 张</span>';
+    html += '<span style="margin-left:auto;font-size:11px;color:#6b7280">剩余 ' + room.remainingCount + ' 张</span>';
     html += '</div>';
 
     // Players
@@ -560,6 +560,22 @@
         html += '</div>';
       }
       html += '</div>';
+    });
+    html += '</div>';
+
+    // Card Grid (20 cards, 5×4)
+    html += '<div class="card-grid">';
+    (room.cards || []).forEach(function (c, idx) {
+      if (c.revealed) {
+        var colorClass = getCardColorClass(c.card);
+        html += '<div class="grid-card face-up flipped">';
+        html += '<span class="grid-card-text ' + colorClass + '">' + escHtml(c.card) + '</span>';
+        html += '</div>';
+      } else {
+        var canClick = isMyTurn && !isPendingForMe;
+        html += '<div class="grid-card face-down ' + (canClick ? 'clickable' : 'disabled') + '" onclick="App.pickCard(' + idx + ')">';
+        html += '</div>';
+      }
     });
     html += '</div>';
 
@@ -610,15 +626,15 @@
       html += '<span class="status-text" style="color:#fbbf24">你摸到了J，请选择加酒杯数 ↑</span>';
     } else if (isMyTurn) {
       if (selfPlayer && selfPlayer.activeQ) {
-        html += '<button class="btn btn-primary btn-sm" onclick="App.drawCard()">摸牌</button>';
+        html += '<span class="status-text" style="color:#fde68a">👆 请选择翻牌  或  </span>';
         html += '<button class="btn btn-secondary btn-sm" onclick="App.skipTurn()">🛡跳过(Q)</button>';
       } else {
-        html += '<button class="btn btn-primary btn-full" onclick="App.drawCard()">摸牌</button>';
+        html += '<span class="status-text" style="color:#fde68a">👆 请从上方选择一张牌翻开</span>';
       }
     } else if (isPendingForMe) {
       html += '<span class="status-text">等待操作...</span>';
     } else {
-      html += '<span class="status-text">等待 ' + escHtml(currentPlayer ? currentPlayer.nickName : '...') + ' 摸牌</span>';
+      html += '<span class="status-text">等待 ' + escHtml(currentPlayer ? currentPlayer.nickName : '...') + ' 翻牌</span>';
     }
     html += '</div>';
 
@@ -649,11 +665,11 @@
     return '<div class="poker-card" style="width:24px;height:32px"><span class="poker-card-text ' + colorClass + '" style="font-size:9px">' + escHtml(card) + '</span></div>';
   }
 
-  App.drawCard = function () {
-    showLoading('摸牌中...');
-    api('drawCard', { roomId: state.roomId }).then(function (result) {
+  App.pickCard = function (position) {
+    showLoading('翻牌中...');
+    api('drawCard', { roomId: state.roomId, position: position }).then(function (result) {
       hideLoading();
-      if (!result.ok) { showToast(result.message || '摸牌失败'); return; }
+      if (!result.ok) { showToast(result.message || '翻牌失败'); return; }
 
       // Show effect toast
       if (result.cardEffect) {

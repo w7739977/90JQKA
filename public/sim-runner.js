@@ -182,8 +182,15 @@
           }
         }
 
-        // Draw card
-        var drawR = await api('drawCard', { playerId: cpId, roomId: roomId });
+        // Draw card — pick first unrevealed position
+        var pickPos = -1;
+        var cardsList = room.cards || [];
+        for (var pi = 0; pi < cardsList.length; pi++) {
+          if (!cardsList[pi].revealed) { pickPos = pi; break; }
+        }
+        if (pickPos === -1) { log('error', '没有可翻的牌了'); break; }
+
+        var drawR = await api('drawCard', { playerId: cpId, roomId: roomId, position: pickPos });
         if (!drawR.ok) {
           log('error', cpName + ' 摸牌失败: ' + drawR.message);
           break;
@@ -329,7 +336,15 @@
         var cp2 = st2.room.players[st2.room.currentPlayerIdx];
         if (!cp2) break;
 
-        var d2 = await api('drawCard', { playerId: cp2.openId, roomId: roomId });
+        // Pick first unrevealed position
+        var r2Pos = -1;
+        var r2Cards = st2.room.cards || [];
+        for (var r2pi = 0; r2pi < r2Cards.length; r2pi++) {
+          if (!r2Cards[r2pi].revealed) { r2Pos = r2pi; break; }
+        }
+        if (r2Pos === -1) break;
+
+        var d2 = await api('drawCard', { playerId: cp2.openId, roomId: roomId, position: r2Pos });
         if (!d2.ok) break;
 
         turnNum++;

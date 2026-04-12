@@ -61,8 +61,13 @@ function sanitizeRoom(room) {
     kCount: room.kCount,
     aCount: room.aCount,
     currentPlayerIdx: room.currentPlayerIdx,
-    drawIndex: room.drawIndex,
     deckSize: room.deck.length,
+    cards: room.deck.map((card, idx) => ({
+      position: idx,
+      revealed: room.revealed[idx],
+      card: room.revealed[idx] ? card : null
+    })),
+    remainingCount: room.revealed.filter(r => !r).length,
     players: room.players.map(p => ({
       openId: p.openId,
       nickName: p.nickName,
@@ -103,7 +108,7 @@ app.post('/api/createRoom', (req, res) => {
       ownerOpenId: playerId,
       status: 'waiting',
       deck: [],
-      drawIndex: 0,
+      revealed: [],
       currentPlayerIdx: 0,
       direction: 1,
       publicCup: 0,
@@ -251,7 +256,7 @@ app.post('/api/startGame', (req, res) => {
 
     // Initialize game
     room.deck = shuffle(createDeck());
-    room.drawIndex = 0;
+    room.revealed = new Array(room.deck.length).fill(false);
     // Find owner's index as starting player
     const ownerIdx = room.players.findIndex(p => p.openId === room.ownerOpenId);
     room.currentPlayerIdx = ownerIdx >= 0 ? ownerIdx : 0;
@@ -280,7 +285,7 @@ app.post('/api/startGame', (req, res) => {
 
 app.post('/api/drawCard', (req, res) => {
   try {
-    const { playerId, roomId: rawRoomId } = req.body;
+    const { playerId, roomId: rawRoomId, position: rawPos } = req.body;
     if (!playerId) return res.json({ ok: false, code: 'NO_PLAYER_ID', message: '缺少玩家ID' });
 
     const roomId = String(rawRoomId || '').trim();
@@ -311,13 +316,18 @@ app.post('/api/drawCard', (req, res) => {
       return res.json({ ok: false, code: 'NOT_YOUR_TURN', message: '还没轮到你' });
     }
 
-    if (room.drawIndex >= room.deck.length) {
-      return res.json({ ok: false, code: 'DECK_EMPTY', message: '牌已摸完' });
+    // Validate position
+    const position = parseInt(rawPos);
+    if (isNaN(position) || position < 0 || position >= room.deck.length) {
+      return res.json({ ok: false, code: 'INVALID_POSITION', message: '无效的牌位置' });
+    }
+    if (room.revealed[position]) {
+      return res.json({ ok: false, code: 'CARD_ALREADY_REVEALED', message: '这张牌已经被翻开' });
     }
 
-    // Draw the card
-    const card = room.deck[room.drawIndex];
-    room.drawIndex++;
+    // Reveal the card at the chosen position
+    room.revealed[position] = true;
+    const card = room.deck[position];
 
     const rank = getCardRank(card);
     currentPlayer.lastDrawnCard = card;
@@ -340,13 +350,11 @@ app.post('/api/drawCard', (req, res) => {
       room.pendingAction = { type: 'addWine', playerIdx: currentIdx, card };
 
     } else if (rank === 'Q') {
-      // Check if anyone else has activeQ
-      const existingQHolder = room.players.find(p => p.activeQ && p.openId !== playerId);
-      if (existingQHolder) {
-        existingQHolder.activeQ = false;
-        currentPlayer.activeQ = false; // the new Q also gets cancelled
-        logEntry.action = '双Q相消！';
-        cardEffect = { type: 'qCancel', cancelledPlayer: existingQHolder.openId };
+      // New Q rule: same player draws 2nd Q → self-cancel; different players can both have Q
+      if (currentPlayer.activeQ) {
+        currentPlayer.activeQ = false;
+        logEntry.action = '双Q自消！';
+        cardEffect = { type: 'qCancel' };
       } else {
         currentPlayer.activeQ = true;
         logEntry.action = '获得跳过能力';
@@ -509,7 +517,7 @@ app.post('/api/restartGame', (req, res) => {
 
     // Reset game state but keep players and drinks
     room.deck = shuffle(createDeck());
-    room.drawIndex = 0;
+    room.revealed = new Array(room.deck.length).fill(false);
     room.currentPlayerIdx = 0;
     room.direction = 1;
     room.publicCup = 0;
@@ -624,7 +632,7 @@ app.post('/api/_simCreateRoom', (req, res) => {
       ownerOpenId: players[0].id,
       status: 'waiting',
       deck: finalDeck,
-      drawIndex: 0,
+      revealed: new Array(finalDeck.length).fill(false),
       currentPlayerIdx: 0,
       direction: 1,
       publicCup: 0,
